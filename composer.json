@@ -1,0 +1,24 @@
+{
+    "name": "gitlab/composer-plugin",
+    "description": "Composer plugin for GitLabHQ repositories",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jérôme Tamarelle",
+            "email": "jerome@tamarelle.net"
+        }
+    ],
+    "require": {
+        "composer-plugin-api": "1.0.0"
+    },
+    "require-dev": {
+        "composer/composer": "dev-master",
+        "phpspec/phpspec": "2.0.*@dev"
+    },
+    "autoload": {
+        "psr-0": {
+            "GitLab\\Composer\\": "src/"
+        }
+    }
+}
