@@ -10,11 +10,16 @@
         }
     ],
     "require": {
+        "m4tthumphrey/php-gitlab-api": "~6.0",
         "composer-plugin-api": "1.0.0"
     },
     "require-dev": {
         "composer/composer": "dev-master",
-        "phpspec/phpspec": "2.0.*@dev"
+        "phpspec/phpspec": "2.0.*@dev",
+        "composer/satis": "dev-master"
+    },
+    "extra": {
+        "class": "GitLab\\Composer\\Plugin\\GitLabPlugin"
     },
     "autoload": {
         "psr-0": {
