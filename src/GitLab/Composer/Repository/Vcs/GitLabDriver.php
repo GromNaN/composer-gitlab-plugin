@@ -12,8 +12,8 @@ use Composer\Util\RemoteFilesystem;
 class GitLabDriver extends VcsDriver
 {
     protected $cache;
-    protected $owner;
-    protected $repository;
+    protected $namespace;
+    protected $name;
     protected $tags;
     protected $branches;
     protected $rootIdentifier;
@@ -21,13 +21,7 @@ class GitLabDriver extends VcsDriver
     protected $infoCache = array();
     protected $scheme;
     protected $projectData;
-
-    /**
-     * Git Driver
-     *
-     * @var GitDriver
-     */
-    protected $gitDriver;
+    protected $identifierDate = array();
 
     /**
      * {@inheritDoc}
@@ -36,11 +30,11 @@ class GitLabDriver extends VcsDriver
     {
         preg_match('#^/([\w-_]+)/([\w-_]+)(\.git)?$#', parse_url($this->url, PHP_URL_PATH), $match);
 
-        $this->owner = $match[1];
-        $this->repository = $match[2];
+        $this->namespace = $match[1];
+        $this->name = $match[2];
         $this->originUrl = parse_url($this->url, PHP_URL_HOST);
         $this->scheme = parse_url($this->url, PHP_URL_SCHEME);
-        $this->cache = new Cache($this->io, $this->config->get('cache-repo-dir').'/'.$this->originUrl.'/'.$this->owner.'/'.$this->repository);
+        $this->cache = new Cache($this->io, $this->config->get('cache-repo-dir').'/'.$this->originUrl.'/'.$this->namespace.'/'.$this->name);
 
         $this->remoteFilesystem = new RemoteFilesystem($this->io, array(
             'http' => array(
@@ -50,7 +44,6 @@ class GitLabDriver extends VcsDriver
             ),
         ));
 
-        $this->fetchProjectId();
         $this->fetchRootIdentifier();
     }
 
@@ -59,10 +52,6 @@ class GitLabDriver extends VcsDriver
      */
     public function getRootIdentifier()
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getRootIdentifier();
-        }
-
         return $this->rootIdentifier;
     }
 
@@ -71,10 +60,6 @@ class GitLabDriver extends VcsDriver
      */
     public function getUrl()
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getUrl();
-        }
-
         return $this->projectData['ssh_url_to_repo'];
     }
 
@@ -83,10 +68,6 @@ class GitLabDriver extends VcsDriver
      */
     public function getSource($identifier)
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getSource($identifier);
-        }
-
         $url = $this->getUrl();
 
         return array('type' => 'git', 'url' => $url, 'reference' => $identifier);
@@ -97,10 +78,7 @@ class GitLabDriver extends VcsDriver
      */
     public function getDist($identifier)
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getDist($identifier);
-        }
-        $url = 'https://api.github.com/repos/'.$this->owner.'/'.$this->repository.'/zipball/'.$identifier;
+        $url = 'https://api.github.com/repos/'.$this->namespace.'/'.$this->name.'/zipball/'.$identifier;
 
         return array('type' => 'zip', 'url' => $url, 'reference' => $identifier, 'shasum' => '');
     }
@@ -110,26 +88,19 @@ class GitLabDriver extends VcsDriver
      */
     public function getComposerInformation($identifier)
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getComposerInformation($identifier);
-        }
-
         if (preg_match('{[a-f0-9]{40}}i', $identifier) && $res = $this->cache->read($identifier)) {
             $this->infoCache[$identifier] = JsonFile::parseJson($res);
         }
 
         if (!isset($this->infoCache[$identifier])) {
-            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/repository/commits/'.urlencode($identifier).'/blob?filepath=composer.json';
-            $composer = JsonFile::parseJson($this->getContents($resource));
-            if (empty($composer)) {
-                throw new \RuntimeException('Could not retrieve composer.json from '.$resource);
-            }
+            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/repository/blobs/'.urlencode($identifier).'?filepath=composer.json';
+            $composer = JsonFile::parseJson($this->getContents($resource), $resource);
 
             if ($composer && false) { // @TODO
                 $composer = JsonFile::parseJson($composer, $resource);
 
                 if (!isset($composer['time'])) {
-                    $resource = 'https://api.github.com/repos/'.$this->owner.'/'.$this->repository.'/commits/'.urlencode($identifier);
+                    $resource = 'https://api.github.com/repos/'.$this->namespace.'/'.$this->name.'/commits/'.urlencode($identifier);
                     $commit = JsonFile::parseJson($this->getContents($resource), $resource);
                     $composer['time'] = $commit['commit']['committer']['date'];
                 }
@@ -150,15 +121,13 @@ class GitLabDriver extends VcsDriver
      */
     public function getTags()
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getTags();
-        }
         if (null === $this->tags) {
-            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/repository/tags';
+            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/name/tags';
             $tagsData = JsonFile::parseJson($this->getContents($resource), $resource);
             $this->tags = array();
             foreach ($tagsData as $tag) {
                 $this->tags[$tag['name']] = $tag['commit']['id'];
+                $this->identifierDate[$tag['commit']['id']] = $tag['commit']['committed_date'];
             }
         }
 
@@ -170,15 +139,13 @@ class GitLabDriver extends VcsDriver
      */
     public function getBranches()
     {
-        if ($this->gitDriver) {
-            return $this->gitDriver->getBranches();
-        }
         if (null === $this->branches) {
-            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/repository/branches';
+            $resource = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId.'/name/branches';
             $branchData = JsonFile::parseJson($this->getContents($resource), $resource);
             $this->branches = array();
             foreach ($branchData as $branch) {
                 $this->branches[$branch['name']] = $branch['commit']['id'];
+                $this->identifierDate[$branch['commit']['id']] = $branch['commit']['committed_date'];
             }
         }
 
@@ -186,20 +153,13 @@ class GitLabDriver extends VcsDriver
     }
 
     /**
+     * GitLab cannot be detected automatically
+     *
      * {@inheritDoc}
      */
     public static function supports(IOInterface $io, $url, $deep = false)
     {
-        // GitLab cannot be detected automatically
-        return false;
-    }
-
-    /**
-     * @TODO
-     */
-    protected function fetchProjectId()
-    {
-        $this->projectId = 12;
+        return true;
     }
 
     /**
@@ -209,13 +169,18 @@ class GitLabDriver extends VcsDriver
      */
     protected function fetchRootIdentifier()
     {
-        $projectDataUrl = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$this->projectId;
+        $id = urlencode($this->namespace.'/'.$this->name);
+        $id = 11;
+        $projectDataUrl = $this->getScheme().'://'.$this->originUrl.'/api/v3/projects/'.$id;
 
         $content = $this->getContents($projectDataUrl, true);
         $this->projectData = JsonFile::parseJson($content, $projectDataUrl);
-        if (null === $this->projectData && null !== $this->gitDriver) {
-            return;
+
+        if (null === $this->projectData) {
+            throw new \RuntimeException('failed to laod project');
         }
+
+        $this->projectId = $this->projectData['id'];
 
         if (isset($this->projectData['default_branch'])) {
             $this->rootIdentifier = $this->projectData['default_branch'];
